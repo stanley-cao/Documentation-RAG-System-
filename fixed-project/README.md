@@ -1,8 +1,8 @@
 # Agentic RAG Masterclass
 
-Build a RAG application using AI coding tools. Learn the concepts, prompt Claude Code to build each piece.
+RAG application using AI coding tools.
 
-## What You Build
+## What was built
 
 - Chat interface with threaded conversations
 - Document ingestion with drag-and-drop
@@ -13,8 +13,3 @@ Build a RAG application using AI coding tools. Learn the concepts, prompt Claude
 
 React + FastAPI + Supabase + OpenRouter + LangSmith
 
-## Docs
-
-- [PRD.md](./PRD.md) - What to build
-- [CLAUDE.md](./CLAUDE.md) - Context for AI coding
-- [PROGRESS.md](./PROGRESS.md) - Track your progress (update as you go)

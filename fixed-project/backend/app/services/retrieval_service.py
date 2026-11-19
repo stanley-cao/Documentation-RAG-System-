@@ -24,15 +24,17 @@ async def search_documents(
     user_id: str,
     top_k: int | None = None,
     threshold: float | None = None,
+    keywords: list[str] | None = None,
 ) -> list[dict]:
     """
-    Search user's documents for relevant chunks using vector similarity.
+    Search user's documents with hybrid (vector + keyword) retrieval.
 
     Args:
         query: Search query text
         user_id: The user's ID; match_chunks only searches this user's chunks
         top_k: Maximum number of results (None = use global setting)
         threshold: Minimum cosine similarity, 0-1 (None = use global setting)
+        keywords: Exact terms for the keyword branch; if omitted, the query text is used
 
     Returns:
         List of matching chunks with similarity scores
@@ -45,8 +47,12 @@ async def search_documents(
 
     query_embedding = await get_embeddings([query], user_id=user_id)
 
+    # Hybrid retrieval: vector similarity + full-text keyword match, fused with RRF
+    # (see migration 20260123000009). Results are ordered by rrf_score.
     supabase = get_supabase_client()
-    result = supabase.rpc("match_chunks", {
+    result = supabase.rpc("hybrid_match_chunks", {
+        # Keyword branch: explicit keywords if given, otherwise the query's own words
+        "query_text": " ".join(keywords) if keywords else query,
         "query_embedding": query_embedding[0],
         "match_threshold": threshold,
         "match_count": top_k,

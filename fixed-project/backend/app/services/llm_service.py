@@ -67,23 +67,13 @@ async def astream_chat_response(
         api_key=llm_settings["api_key"],
     )
 
-    # Strip tool call messages from history — Groq struggles with them in context
-    # Keep only user/assistant text messages
-    clean_messages = []
-    for m in messages:
-        role = m.get("role")
-        if role == "tool":
-            continue
-        if role == "assistant" and m.get("tool_calls"):
-            # Convert tool-call assistant message to plain text if content exists
-            if m.get("content"):
-                clean_messages.append({"role": "assistant", "content": m["content"]})
-            continue
-        clean_messages.append({"role": m["role"], "content": m.get("content", "")})
-
+    # Pass messages through unchanged. Stored history is already user/assistant text only
+    # (see chat.get_thread_messages); the only tool_calls / tool messages here are from the
+    # current turn's tool loop, and the model MUST see them, or it never gets the search
+    # results and keeps re-calling the tool until the round limit (empty reply).
     request_kwargs: dict[str, Any] = {
         "model": model,
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *clean_messages],
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *messages],
         "stream": True,
     }
     if tools:

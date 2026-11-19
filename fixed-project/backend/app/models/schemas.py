@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, StringConstraints
 from datetime import datetime
 
 
@@ -19,7 +21,8 @@ class ThreadUpdate(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    content: str
+    # Reject empty / whitespace-only messages with a 422
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class MessageResponse(BaseModel):

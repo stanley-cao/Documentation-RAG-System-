@@ -1,3 +1,6 @@
+from typing import Any
+
+import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
@@ -7,6 +10,43 @@ from app.config import get_settings
 from app.db.supabase import get_supabase_client
 
 security = HTTPBearer()
+
+# Supabase signs access tokens with asymmetric keys; only accept those algorithms
+ALLOWED_ALGORITHMS: list[str] = ["ES256", "RS256"]
+
+# Cached JWKS keyed by "kid", so we only hit Supabase on startup or key rotation
+_jwks_cache: dict[str, dict[str, Any]] = {}
+
+
+async def _refresh_jwks() -> None:
+    """Fetch Supabase's public signing keys into the cache."""
+    url = f"{get_settings().supabase_url}/auth/v1/.well-known/jwks.json"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+    _jwks_cache.clear()
+    for key in response.json().get("keys", []):
+        if "kid" in key:
+            _jwks_cache[key["kid"]] = key
+
+
+async def get_signing_key(token: str) -> dict[str, Any]:
+    """Return the JWK that signed this token, refetching once if the kid is unknown (key rotation)."""
+    kid = jwt.get_unverified_header(token).get("kid")
+    if not kid:
+        raise JWTError("Token header missing kid")
+    if kid not in _jwks_cache:
+        try:
+            await _refresh_jwks()
+        except httpx.HTTPError as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not fetch auth signing keys: {e}",
+            )
+    key = _jwks_cache.get(kid)
+    if not key:
+        raise JWTError("Unknown signing key")
+    return key
 
 
 class User(BaseModel):
@@ -19,16 +59,16 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> User:
     """Verify Supabase JWT token and extract user info, including admin status."""
-    settings = get_settings()
     token = credentials.credentials
 
     try:
+        # Verify the signature against Supabase's published public key (no more unverified decode)
+        signing_key = await get_signing_key(token)
         payload = jwt.decode(
             token,
-            settings.supabase_anon_key,
-            algorithms=["HS256", "ES256"],
-            options={"verify_signature": False},
-            audience="authenticated"
+            signing_key,
+            algorithms=ALLOWED_ALGORITHMS,
+            audience="authenticated",
         )
 
         user_id = payload.get("sub")

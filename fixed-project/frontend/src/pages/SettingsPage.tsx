@@ -26,6 +26,9 @@ export function SettingsPage() {
   const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('')
   const [embeddingApiKey, setEmbeddingApiKey] = useState('')
   const [embeddingDimensions, setEmbeddingDimensions] = useState('')
+  // Retrieval tuning (kept as strings while editing so the inputs can be cleared)
+  const [similarityThreshold, setSimilarityThreshold] = useState('')
+  const [topK, setTopK] = useState('')
   const [showLlmKey, setShowLlmKey] = useState(false)
   const [showEmbeddingKey, setShowEmbeddingKey] = useState(false)
 
@@ -54,6 +57,8 @@ export function SettingsPage() {
       setEmbeddingBaseUrl(settings.embedding_base_url || '')
       setEmbeddingApiKey(settings.embedding_api_key || '')
       setEmbeddingDimensions(settings.embedding_dimensions?.toString() || '')
+      setSimilarityThreshold(settings.retrieval_similarity_threshold.toString())
+      setTopK(settings.retrieval_top_k.toString())
       setHasChunks(settings.has_chunks)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings')
@@ -75,8 +80,14 @@ export function SettingsPage() {
         embedding_base_url: embeddingBaseUrl || null,
         embedding_api_key: embeddingApiKey || null,
         embedding_dimensions: embeddingDimensions ? parseInt(embeddingDimensions, 10) : null,
+        // Empty input = leave unchanged (backend treats null as "no change")
+        retrieval_similarity_threshold: similarityThreshold !== '' ? parseFloat(similarityThreshold) : null,
+        retrieval_top_k: topK !== '' ? parseInt(topK, 10) : null,
       }
-      await updateSettings(update)
+      const saved = await updateSettings(update)
+      // Reflect the stored values (e.g. if a field was left blank)
+      setSimilarityThreshold(saved.retrieval_similarity_threshold.toString())
+      setTopK(saved.retrieval_top_k.toString())
       setSuccess(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings')
@@ -284,6 +295,47 @@ export function SettingsPage() {
                       value={embeddingDimensions}
                       onChange={(e) => setEmbeddingDimensions(e.target.value)}
                       disabled={hasChunks}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="border-t" />
+
+              {/* Retrieval Configuration (not locked by existing chunks) */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-medium text-foreground">Retrieval Configuration</h3>
+                <p className="text-xs text-muted-foreground">
+                  Controls which chunks the search_documents tool returns. Higher thresholds return fewer, more relevant chunks.
+                </p>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">Similarity Threshold (0–1)</label>
+                    <Input
+                      name="retrieval-threshold-field"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      autoComplete="off"
+                      placeholder="e.g., 0.1"
+                      value={similarityThreshold}
+                      onChange={(e) => setSimilarityThreshold(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">Max Results (1–50)</label>
+                    <Input
+                      name="retrieval-topk-field"
+                      type="number"
+                      min={1}
+                      max={50}
+                      step={1}
+                      autoComplete="off"
+                      placeholder="e.g., 15"
+                      value={topK}
+                      onChange={(e) => setTopK(e.target.value)}
                     />
                   </div>
                 </div>

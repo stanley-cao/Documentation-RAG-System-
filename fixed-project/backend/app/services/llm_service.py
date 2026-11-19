@@ -14,7 +14,9 @@ For follow-up questions about previous search results, you can answer directly f
 
 Grounding rules for answers about the user's documents:
 - State only facts that appear in the retrieved text. Quote names, numbers, and dates exactly as written there.
-- Do not add categories, labels, or context from your own knowledge (e.g. groupings, eras, classifications) unless the document itself contains them. If you think outside knowledge would help, offer it separately and clearly mark it as not from the document.
+- Do not present your own knowledge as if it came from the document.
+- You MAY use general knowledge to decide what to look up. Example: if asked for "the first item of each group" and you know where groups start, search for those exact numbers or names. Pass them together in the `keywords` list of ONE search_documents call (e.g. ["252", "387", "494"]); do not search for them one at a time.
+- When an answer combines the two, you MUST say which part is general knowledge (e.g. "where each group starts is general knowledge") and which part comes from the document (e.g. the names found there). Never claim general knowledge came from the document.
 - Search results are excerpts, not the whole file. Never guess at content you did not see, never invent entries, ranges, or sections, and never write "if present". If the excerpts don't cover something, say so plainly.
 - If the search returns nothing relevant, say the documents don't appear to contain that information.
 - Keep answers concise. If a complete answer would be a very long list (dozens of items), do not enumerate everything: describe what the document is, give a few exact examples from the excerpts, and offer to look up specific items."""
@@ -23,13 +25,26 @@ RAG_TOOLS = [{
     "type": "function",
     "function": {
         "name": "search_documents",
-        "description": "Search the user's uploaded documents for relevant information.",
+        "description": (
+            "Search the user's uploaded documents. Hybrid search: matches by meaning AND by exact "
+            "keywords (names, numbers, IDs). To look up several specific items, list them all as "
+            "keywords in one query."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query"
+                    "description": "What you are looking for, in natural language"
+                },
+                "keywords": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional exact terms to match (names, numbers, IDs). Put ALL the specific "
+                        "items you need in this one list, e.g. [\"252\", \"387\", \"494\"], rather than "
+                        "searching for them one at a time."
+                    )
                 }
             },
             "required": ["query"]
@@ -111,11 +126,20 @@ async def astream_chat_response(
             if delta and delta.tool_calls:
                 for tc in delta.tool_calls:
                     idx = tc.index
+                    if idx is None:
+                        # Gemini sends each call whole with index=null: a new id means a new call,
+                        # otherwise it continues the most recent one
+                        known_ids = {b["id"] for b in tool_calls_buffer.values()}
+                        if tc.id and tc.id not in known_ids:
+                            idx = len(tool_calls_buffer)
+                        else:
+                            idx = max(tool_calls_buffer, default=0)
                     if idx not in tool_calls_buffer:
                         tool_calls_buffer[idx] = {
                             "id": tc.id or "",
                             "name": tc.function.name if tc.function else "",
                             "arguments": "",
+                            "extra_content": None,
                         }
                     else:
                         if tc.id:
@@ -124,6 +148,11 @@ async def astream_chat_response(
                             tool_calls_buffer[idx]["name"] = tc.function.name
                     if tc.function and tc.function.arguments:
                         tool_calls_buffer[idx]["arguments"] += tc.function.arguments
+                    # Provider-specific data that must be echoed back, e.g. Gemini's
+                    # extra_content.google.thought_signature (requests fail with 400 without it)
+                    extra = (tc.model_extra or {}).get("extra_content")
+                    if extra:
+                        tool_calls_buffer[idx]["extra_content"] = extra
 
         # Strip Qwen3 thinking blocks from response
         import re
@@ -141,4 +170,15 @@ async def astream_chat_response(
     except HTTPException:
         raise
     except Exception as e:
-        yield {"type": "error", "error": str(e)}
+        yield {"type": "error", "error": _friendly_error(e)}
+
+
+def _friendly_error(e: Exception) -> str:
+    """Turn common provider limit errors into actionable messages; pass others through."""
+    status_code = getattr(e, "status_code", None)
+    if status_code == 413:
+        return ("This question pulled in more document text than the model's plan allows per request. "
+                "Try a narrower question, or lower Max Results in Settings.")
+    if status_code == 429:
+        return "The model's rate limit was reached. Wait about 20 seconds and try again."
+    return str(e)

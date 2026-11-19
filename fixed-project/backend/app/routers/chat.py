@@ -11,7 +11,15 @@ from app.services.tool_executor import execute_tool_call
 
 router = APIRouter(prefix="/threads/{thread_id}", tags=["chat"])
 
-MAX_TOOL_ROUNDS = 3
+# Up to 3 search rounds + 1 final answer round (tools withheld)
+MAX_TOOL_ROUNDS = 4
+
+# Sent before the final round so the model answers instead of attempting another search
+# (some providers error if the model calls a tool when none are offered)
+FINAL_ROUND_NOTICE = (
+    "Search limit reached for this question. Do not call any tools. "
+    "Answer now using only the excerpts above; say plainly if something was not found."
+)
 
 
 async def verify_thread_access(thread_id: str, user_id: str) -> dict:
@@ -86,6 +94,8 @@ async def send_message(
         # Working messages for tool loop — kept in memory only, not persisted
         working_messages = list(messages)
         rounds = 0
+        # Chunks already sent to the model this turn, so repeat searches don't resend them
+        seen_chunk_ids: set[str] = set()
 
         try:
             while rounds < MAX_TOOL_ROUNDS:
@@ -93,6 +103,8 @@ async def send_message(
 
                 # On the final round, withhold tools so the model must answer with text
                 round_tools = tools if rounds < MAX_TOOL_ROUNDS else None
+                if round_tools is None and tools and any(m.get("role") == "tool" for m in working_messages):
+                    working_messages.append({"role": "system", "content": FINAL_ROUND_NOTICE})
 
                 async for event in astream_chat_response(
                     working_messages,
@@ -117,7 +129,9 @@ async def send_message(
                                     "function": {
                                         "name": tc["name"],
                                         "arguments": tc["arguments"],
-                                    }
+                                    },
+                                    # Echo provider data (Gemini thought signature) only when present
+                                    **({"extra_content": tc["extra_content"]} if tc.get("extra_content") else {}),
                                 }
                                 for tc in tool_calls
                             ],
@@ -125,7 +139,7 @@ async def send_message(
 
                         # Execute each tool and add results to working messages
                         for tc in tool_calls:
-                            result = await execute_tool_call(tc, current_user.id)
+                            result = await execute_tool_call(tc, current_user.id, seen_chunk_ids)
                             working_messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc["id"],

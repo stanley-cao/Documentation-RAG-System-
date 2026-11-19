@@ -208,6 +208,8 @@ export interface GlobalSettings {
   embedding_base_url: string | null
   embedding_api_key: string | null
   embedding_dimensions: number | null
+  retrieval_similarity_threshold: number
+  retrieval_top_k: number
   has_chunks: boolean
 }
 
@@ -219,6 +221,8 @@ export interface GlobalSettingsUpdate {
   embedding_base_url?: string | null
   embedding_api_key?: string | null
   embedding_dimensions?: number | null
+  retrieval_similarity_threshold?: number | null
+  retrieval_top_k?: number | null
 }
 
 export async function getSettings(): Promise<GlobalSettings> {

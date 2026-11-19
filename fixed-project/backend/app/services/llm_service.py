@@ -10,7 +10,14 @@ from app.routers.settings import decrypt_value
 SYSTEM_PROMPT = """You are a helpful assistant with access to a search_documents tool.
 
 When users ask about their documents or uploaded files, use search_documents to find relevant content.
-For follow-up questions about previous search results, you can answer directly from what was already retrieved without searching again."""
+For follow-up questions about previous search results, you can answer directly from what was already retrieved without searching again.
+
+Grounding rules for answers about the user's documents:
+- State only facts that appear in the retrieved text. Quote names, numbers, and dates exactly as written there.
+- Do not add categories, labels, or context from your own knowledge (e.g. groupings, eras, classifications) unless the document itself contains them. If you think outside knowledge would help, offer it separately and clearly mark it as not from the document.
+- Search results are excerpts, not the whole file. Never guess at content you did not see, never invent entries, ranges, or sections, and never write "if present". If the excerpts don't cover something, say so plainly.
+- If the search returns nothing relevant, say the documents don't appear to contain that information.
+- Keep answers concise. If a complete answer would be a very long list (dozens of items), do not enumerate everything: describe what the document is, give a few exact examples from the excerpts, and offer to look up specific items."""
 
 RAG_TOOLS = [{
     "type": "function",
@@ -67,38 +74,34 @@ async def astream_chat_response(
         api_key=llm_settings["api_key"],
     )
 
-    # Strip tool call messages from history — Groq struggles with them in context
-    # Keep only user/assistant text messages
-    clean_messages = []
-    for m in messages:
-        role = m.get("role")
-        if role == "tool":
-            continue
-        if role == "assistant" and m.get("tool_calls"):
-            # Convert tool-call assistant message to plain text if content exists
-            if m.get("content"):
-                clean_messages.append({"role": "assistant", "content": m["content"]})
-            continue
-        clean_messages.append({"role": m["role"], "content": m.get("content", "")})
-
+    # Pass messages through unchanged. Stored history is already user/assistant text only
+    # (see chat.get_thread_messages); the only tool_calls / tool messages here are from the
+    # current turn's tool loop, and the model MUST see them, or it never gets the search
+    # results and keeps re-calling the tool until the round limit (empty reply).
     request_kwargs: dict[str, Any] = {
         "model": model,
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *clean_messages],
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *messages],
         "stream": True,
     }
     if tools:
         request_kwargs["tools"] = tools
         request_kwargs["tool_choice"] = "auto"
+    if "gpt-oss" in model:
+        # gpt-oss spends output tokens on hidden reasoning; on low token-per-minute tiers that
+        # can exhaust the budget before any visible text. Low effort keeps room for the answer.
+        request_kwargs["extra_body"] = {"reasoning_effort": "low"}
 
     try:
         stream = await client.chat.completions.create(**request_kwargs)
 
         full_response = ""
         tool_calls_buffer: dict[int, dict] = {}
+        finish_reason: str | None = None
 
         async for chunk in stream:
             if not chunk.choices:
                 continue
+            finish_reason = chunk.choices[0].finish_reason or finish_reason
             delta = chunk.choices[0].delta
 
             if delta and delta.content:
@@ -128,7 +131,12 @@ async def astream_chat_response(
             yield {"type": "tool_calls", "tool_calls": list(tool_calls_buffer.values())}
         else:
             clean_response = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL).strip()
-            yield {"type": "response_completed", "content": clean_response or full_response}
+            yield {
+                "type": "response_completed",
+                "content": clean_response or full_response,
+                # "length" = provider cut the output off at its token limit
+                "truncated": finish_reason == "length",
+            }
 
     except HTTPException:
         raise

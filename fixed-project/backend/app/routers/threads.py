@@ -8,6 +8,25 @@ from app.models.schemas import ThreadCreate, ThreadResponse, ThreadUpdate
 router = APIRouter(prefix="/threads", tags=["threads"])
 
 
+def get_owned_thread(thread_id: str, user_id: str) -> dict:
+    """Return the thread if it exists and belongs to the user, else raise 404.
+
+    Uses limit(1) rather than .single(), which raises (-> 500) when no row matches.
+    """
+    supabase = get_supabase_client()
+    result = (
+        supabase.table("threads").select("*")
+        .eq("id", thread_id).eq("user_id", user_id)
+        .limit(1).execute()
+    )
+    if not result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thread not found"
+        )
+    return result.data[0]
+
+
 @router.get("", response_model=list[ThreadResponse])
 async def list_threads(current_user: User = Depends(get_current_user)):
     """List all threads for the current user."""
@@ -48,16 +67,7 @@ async def get_thread(
     current_user: User = Depends(get_current_user)
 ):
     """Get a specific thread."""
-    supabase = get_supabase_client()
-    result = supabase.table("threads").select("*").eq("id", thread_id).eq("user_id", current_user.id).single().execute()
-
-    if not result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found"
-        )
-
-    return result.data
+    return get_owned_thread(thread_id, current_user.id)
 
 
 @router.patch("/{thread_id}", response_model=ThreadResponse)
@@ -70,12 +80,7 @@ async def update_thread(
     supabase = get_supabase_client()
 
     # First verify the thread belongs to the user
-    existing = supabase.table("threads").select("id").eq("id", thread_id).eq("user_id", current_user.id).single().execute()
-    if not existing.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found"
-        )
+    get_owned_thread(thread_id, current_user.id)
 
     result = supabase.table("threads").update({
         "title": thread_data.title,
@@ -94,13 +99,7 @@ async def delete_thread(
     supabase = get_supabase_client()
 
     # Verify the thread belongs to the user
-    result = supabase.table("threads").select("id").eq("id", thread_id).eq("user_id", current_user.id).single().execute()
-
-    if not result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thread not found"
-        )
+    get_owned_thread(thread_id, current_user.id)
 
     # Delete from database (messages will cascade delete)
     supabase.table("threads").delete().eq("id", thread_id).execute()

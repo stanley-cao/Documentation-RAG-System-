@@ -1,8 +1,7 @@
 """Global settings router for LLM and embedding configuration."""
-from unittest import result
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.dependencies import get_current_user, get_admin_user, User
@@ -10,6 +9,10 @@ from app.db.supabase import get_supabase_client
 from app.config import get_settings as get_app_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+# Retrieval defaults, used if the DB row lacks values (match the migration defaults)
+DEFAULT_SIMILARITY_THRESHOLD: float = 0.1
+DEFAULT_TOP_K: int = 15
 
 
 def get_fernet() -> Fernet | None:
@@ -51,6 +54,8 @@ class GlobalSettingsResponse(BaseModel):
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_dimensions: int | None = None
+    retrieval_similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD
+    retrieval_top_k: int = DEFAULT_TOP_K
     has_chunks: bool = False
 
 
@@ -62,6 +67,27 @@ class GlobalSettingsUpdate(BaseModel):
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_dimensions: int | None = None
+    # Retrieval tuning; None = leave unchanged. Bounds mirror the DB CHECK constraints.
+    retrieval_similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    retrieval_top_k: int | None = Field(default=None, ge=1, le=50)
+
+
+def build_settings_response(data: dict | None, has_chunks: bool) -> GlobalSettingsResponse:
+    """Convert a global_settings row into the API response, masking API keys."""
+    if not data:
+        return GlobalSettingsResponse(has_chunks=has_chunks)
+    return GlobalSettingsResponse(
+        llm_model=data.get("llm_model"),
+        llm_base_url=data.get("llm_base_url"),
+        llm_api_key=mask_api_key(decrypt_value(data.get("llm_api_key"))),
+        embedding_model=data.get("embedding_model"),
+        embedding_base_url=data.get("embedding_base_url"),
+        embedding_api_key=mask_api_key(decrypt_value(data.get("embedding_api_key"))),
+        embedding_dimensions=data.get("embedding_dimensions"),
+        retrieval_similarity_threshold=data.get("retrieval_similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD),
+        retrieval_top_k=data.get("retrieval_top_k", DEFAULT_TOP_K),
+        has_chunks=has_chunks,
+    )
 
 
 def mask_api_key(key: str | None) -> str | None:
@@ -97,22 +123,7 @@ def get_global_settings_row() -> dict | None:
 @router.get("", response_model=GlobalSettingsResponse)
 async def get_settings(current_user: User = Depends(get_current_user)):
     """Get global settings with masked API keys."""
-    data = get_global_settings_row()
-    has_chunks = system_has_chunks()
-
-    if not data:
-        return GlobalSettingsResponse(has_chunks=has_chunks)
-
-    return GlobalSettingsResponse(
-        llm_model=data.get("llm_model"),
-        llm_base_url=data.get("llm_base_url"),
-        llm_api_key=mask_api_key(decrypt_value(data.get("llm_api_key"))),
-        embedding_model=data.get("embedding_model"),
-        embedding_base_url=data.get("embedding_base_url"),
-        embedding_api_key=mask_api_key(decrypt_value(data.get("embedding_api_key"))),
-        embedding_dimensions=data.get("embedding_dimensions"),
-        has_chunks=has_chunks,
-    )
+    return build_settings_response(get_global_settings_row(), system_has_chunks())
 
 
 @router.put("", response_model=GlobalSettingsResponse)
@@ -168,20 +179,15 @@ async def update_settings(
         update_data["embedding_api_key"] = encrypt_value(settings_data.embedding_api_key) if settings_data.embedding_api_key else None
     if settings_data.embedding_dimensions is not None:
         update_data["embedding_dimensions"] = settings_data.embedding_dimensions or None
+    # Retrieval settings are not locked by existing chunks; 0.0 is a valid threshold, so no `or None`
+    if settings_data.retrieval_similarity_threshold is not None:
+        update_data["retrieval_similarity_threshold"] = settings_data.retrieval_similarity_threshold
+    if settings_data.retrieval_top_k is not None:
+        update_data["retrieval_top_k"] = settings_data.retrieval_top_k
 
     if not update_data:
         # Nothing to update, return current state
-        data = get_global_settings_row()
-        return GlobalSettingsResponse(
-            llm_model=data.get("llm_model") if data else None,
-            llm_base_url=data.get("llm_base_url") if data else None,
-            llm_api_key=mask_api_key(decrypt_value(data.get("llm_api_key"))) if data else None,
-            embedding_model=data.get("embedding_model") if data else None,
-            embedding_base_url=data.get("embedding_base_url") if data else None,
-            embedding_api_key=mask_api_key(decrypt_value(data.get("embedding_api_key"))) if data else None,
-            embedding_dimensions=data.get("embedding_dimensions") if data else None,
-            has_chunks=has_chunks,
-        )
+        return build_settings_response(get_global_settings_row(), has_chunks)
 
     # Get the existing row ID
     existing = get_global_settings_row()
@@ -201,14 +207,4 @@ async def update_settings(
             detail="Failed to save settings"
         )
 
-    saved = result.data[0]
-    return GlobalSettingsResponse(
-        llm_model=saved.get("llm_model"),
-        llm_base_url=saved.get("llm_base_url"),
-        llm_api_key=mask_api_key(decrypt_value(saved.get("llm_api_key"))),
-        embedding_model=saved.get("embedding_model"),
-        embedding_base_url=saved.get("embedding_base_url"),
-        embedding_api_key=mask_api_key(decrypt_value(saved.get("embedding_api_key"))),
-        embedding_dimensions=saved.get("embedding_dimensions"),
-        has_chunks=has_chunks,
-    )
+    return build_settings_response(result.data[0], has_chunks)

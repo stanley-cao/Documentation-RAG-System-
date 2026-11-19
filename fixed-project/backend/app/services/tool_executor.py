@@ -35,7 +35,13 @@ async def execute_tool_call(tool_call: dict, user_id: str) -> str:
                 f"(similarity: {r['similarity']:.2f})\n{r['content']}"
             )
 
-        return "\n\n---\n\n".join(formatted)
+        # Grounding reminder placed next to the data (models weight this more than the system prompt)
+        header = (
+            f"{len(results)} excerpt(s) retrieved; these may not be the whole document. "
+            "Answer only from this text. Do not add headings, groupings, or labels that are not "
+            "written here (e.g. generations, regions, categories), and do not guess at unseen content."
+        )
+        return header + "\n\n" + "\n\n---\n\n".join(formatted)
 
     logger.warning(f"Unknown tool: {name}")
     return f"Error: Unknown tool '{name}'"

@@ -91,9 +91,12 @@ async def send_message(
             while rounds < MAX_TOOL_ROUNDS:
                 rounds += 1
 
+                # On the final round, withhold tools so the model must answer with text
+                round_tools = tools if rounds < MAX_TOOL_ROUNDS else None
+
                 async for event in astream_chat_response(
                     working_messages,
-                    tools=tools,
+                    tools=round_tools,
                     user_id=current_user.id,
                 ):
                     if event["type"] == "text_delta":
@@ -132,6 +135,17 @@ async def send_message(
                         break  # Go back to top of loop for LLM to respond
 
                     elif event["type"] == "response_completed":
+                        # Reasoning models occasionally finish with no visible text;
+                        # retry (the final round runs without tools) instead of failing
+                        if not full_response and rounds < MAX_TOOL_ROUNDS and not event.get("truncated"):
+                            break
+
+                        if full_response and event.get("truncated"):
+                            # Tell the user (and persist) that the provider cut the reply short
+                            note = "\n\n*(Response cut off: the model hit its output token limit.)*"
+                            full_response += note
+                            yield f"event: text_delta\ndata: {json.dumps({'content': note})}\n\n"
+
                         if full_response:
                             supabase.table("messages").insert({
                                 "thread_id": thread_id,
@@ -143,6 +157,14 @@ async def send_message(
                             supabase.table("threads").update({
                                 "updated_at": datetime.utcnow().isoformat()
                             }).eq("id", thread_id).execute()
+                        else:
+                            # Never end silently: surface an empty reply as an error in the UI
+                            msg = (
+                                "The model ran out of output tokens before answering. Try a narrower question or lower Max Results in Settings."
+                                if event.get("truncated")
+                                else "The model returned an empty response. Please try again."
+                            )
+                            yield f"event: error\ndata: {json.dumps({'error': msg})}\n\n"
 
                         yield f"event: done\ndata: {{}}\n\n"
                         return

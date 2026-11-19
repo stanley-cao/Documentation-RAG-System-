@@ -2,65 +2,37 @@ import { useAuth } from '@/hooks/useAuth'
 import { useRealtimeDocuments } from '@/hooks/useRealtimeDocuments'
 import { DocumentUpload } from '@/components/documents/DocumentUpload'
 import { DocumentList } from '@/components/documents/DocumentList'
-import { UserMenu } from '@/components/UserMenu'
-import { useNavigate } from 'react-router-dom'
-import logoSvg from '/logo.svg'
+import { AppShell } from '@/components/AppShell'
 
 export function DocumentsPage() {
-  const { user, signOut, isAdmin } = useAuth()
+  const { user } = useAuth()
   const { documents, loading, refetch } = useRealtimeDocuments(user?.id)
-  const navigate = useNavigate()
 
-  const handleSignOut = async () => {
-    try {
-      await signOut()
-    } catch (error) {
-      console.error('Failed to sign out:', error)
-    }
-  }
+  // Summary figures for the header
+  const ready = documents.filter(d => d.status === 'completed')
+  const totalChunks = ready.reduce((sum, d) => sum + (d.chunk_count || 0), 0)
 
   return (
-    <div className="flex h-screen">
-      {/* Sidebar */}
-      <div className="flex w-64 flex-col border-r bg-muted/30">
-        <div className="border-b p-4">
-          <img src={logoSvg} alt="Logo" className="h-8" />
-        </div>
-        <nav className="border-b p-2">
-          <div className="flex gap-1">
-            <button
-              onClick={() => navigate('/')}
-              className="flex-1 px-3 py-1.5 rounded-md text-sm hover:bg-muted transition-colors"
-            >
-              Chat
-            </button>
-            <button className="flex-1 px-3 py-1.5 rounded-md text-sm bg-muted font-medium">
-              Documents
-            </button>
-          </div>
-        </nav>
-        <div className="flex-1" />
-        <div className="border-t p-2">
-          {user?.email && (
-            <UserMenu email={user.email} onSignOut={handleSignOut} isAdmin={isAdmin} />
-          )}
-        </div>
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-3xl mx-auto p-8 space-y-8">
-          <div>
-            <h1 className="text-2xl font-bold">Documents</h1>
-            <p className="text-muted-foreground mt-1">
-              Upload documents to use as context in your chats.
+    <AppShell active="documents">
+      <div className="scrollbar-quiet h-full overflow-y-auto">
+        <div className="mx-auto max-w-3xl space-y-10 px-5 py-10 md:px-8">
+          <header className="fade-up">
+            <p className="eyebrow mb-3">Library</p>
+            <h1 className="font-serif text-[40px] font-normal leading-none tracking-tight">Documents</h1>
+            <p className="mt-3 max-w-lg text-[15px] text-muted-foreground">
+              Everything here is split into passages and indexed, so Margin can quote it back to you in chat.
             </p>
-          </div>
+            {!loading && documents.length > 0 && (
+              <p className="mt-5 font-mono text-[12px] text-muted-foreground">
+                {documents.length} {documents.length === 1 ? 'file' : 'files'} · {ready.length} ready · {totalChunks.toLocaleString()} passages
+              </p>
+            )}
+          </header>
 
           <DocumentUpload onUploadComplete={refetch} />
           <DocumentList documents={documents} loading={loading} />
         </div>
       </div>
-    </div>
+    </AppShell>
   )
 }

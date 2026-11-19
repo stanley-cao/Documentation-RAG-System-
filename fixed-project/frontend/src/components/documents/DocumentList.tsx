@@ -1,23 +1,32 @@
-import { Button } from '@/components/ui/button'
+import { useState } from 'react'
+import { FileText, Trash2 } from 'lucide-react'
 import { deleteDocument } from '@/lib/api'
 import type { Document } from '@/types'
-import { useState } from 'react'
+import { cn } from '@/lib/utils'
 
 interface DocumentListProps {
   documents: Document[]
   loading: boolean
 }
 
+/** Status shown as a colored dot + the raw status word (the E2E suite reads the word) */
 function StatusBadge({ status }: { status: Document['status'] }) {
-  const styles = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    processing: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
+  const dot: Record<Document['status'], string> = {
+    pending: 'bg-warning',
+    processing: 'bg-primary animate-pulse',
+    completed: 'bg-primary',
+    failed: 'bg-destructive',
+  }
+  const text: Record<Document['status'], string> = {
+    pending: 'text-warning',
+    processing: 'text-primary',
+    completed: 'text-muted-foreground',
+    failed: 'text-destructive',
   }
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status]}`}>
+    <span className={cn('inline-flex items-center gap-1.5 font-mono text-[11px]', text[status])}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', dot[status])} />
       {status}
     </span>
   )
@@ -27,6 +36,10 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 export function DocumentList({ documents, loading }: DocumentListProps) {
@@ -46,56 +59,56 @@ export function DocumentList({ documents, loading }: DocumentListProps) {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading documents...</p>
+    return (
+      <div className="space-y-3">
+        {[0, 1].map(i => <div key={i} className="h-14 animate-pulse rounded-lg bg-accent/60" />)}
+      </div>
+    )
   }
 
   if (documents.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground text-center py-8">
+      <p className="py-6 text-center font-serif text-[17px] italic text-muted-foreground">
         No documents uploaded yet. Upload a file to get started.
       </p>
     )
   }
 
   return (
-    <div className="space-y-2">
-      {documents.map(doc => (
-        <div
-          key={doc.id}
-          className="flex items-center justify-between p-3 rounded-lg border bg-card"
-        >
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium truncate">{doc.filename}</p>
-              <StatusBadge status={doc.status} />
+    <section>
+      <h2 className="eyebrow mb-3">Files</h2>
+      <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+        {documents.map(doc => (
+          <li key={doc.id} className="group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-background/60">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+              <FileText className="h-4 w-4" />
             </div>
-            <div className="flex items-center gap-3 mt-1">
-              <span className="text-xs text-muted-foreground">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-3">
+                <p className="truncate text-sm font-medium">{doc.filename}</p>
+                <StatusBadge status={doc.status} />
+              </div>
+              <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                 {formatFileSize(doc.file_size)}
-              </span>
-              {doc.status === 'completed' && (
-                <span className="text-xs text-muted-foreground">
-                  {doc.chunk_count} chunks
-                </span>
-              )}
-              {doc.status === 'failed' && doc.error_message && (
-                <span className="text-xs text-destructive truncate max-w-[200px]">
-                  {doc.error_message}
-                </span>
-              )}
+                {doc.status === 'completed' && <> · {doc.chunk_count} chunks</>}
+                {' · '}{formatDate(doc.created_at)}
+                {doc.status === 'failed' && doc.error_message && (
+                  <span className="text-destructive"> · {doc.error_message}</span>
+                )}
+              </p>
             </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleDelete(doc)}
-            disabled={deletingId === doc.id}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            {deletingId === doc.id ? '...' : 'Delete'}
-          </Button>
-        </div>
-      ))}
-    </div>
+            <button
+              onClick={() => handleDelete(doc)}
+              disabled={deletingId === doc.id}
+              title={`Delete ${doc.filename}`}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {deletingId === doc.id ? 'Deleting…' : 'Delete'}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

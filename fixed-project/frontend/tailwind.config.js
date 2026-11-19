@@ -7,6 +7,11 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        serif: ['Newsreader', 'ui-serif', 'Georgia', 'serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+      },
       borderRadius: {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
@@ -43,6 +48,9 @@ export default {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
         },
+        sidebar: 'hsl(var(--sidebar))',
+        highlight: 'hsl(var(--highlight))',
+        warning: 'hsl(var(--warning))',
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',

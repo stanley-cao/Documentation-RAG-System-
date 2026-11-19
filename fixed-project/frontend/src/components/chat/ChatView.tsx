@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Send, Square, Loader2 } from 'lucide-react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { BrandMark } from '@/components/Brand'
+import { Composer } from '@/components/chat/Composer'
 import { getMessages, sendMessage, updateThread } from '@/lib/api'
 import type { Message } from '@/types'
 
@@ -11,6 +11,31 @@ interface ChatViewProps {
   threadId: string
   onThreadTitleUpdate?: (threadId: string, title: string) => void
   initialMessage?: string
+}
+
+/** The user's question: set larger in the serif, with a green margin rule */
+function UserTurn({ content }: { content: string }) {
+  return (
+    <div className="fade-up border-l-2 border-primary pl-4">
+      <p className="eyebrow mb-1.5">You</p>
+      <p className="whitespace-pre-wrap font-serif text-[20px] leading-snug tracking-tight">{content}</p>
+    </div>
+  )
+}
+
+/** Margin's answer: markdown rendered as editorial prose */
+function AssistantTurn({ content }: { content: string }) {
+  return (
+    <div className="fade-up">
+      <p className="eyebrow mb-2 flex items-center gap-1.5">
+        <BrandMark className="h-3.5 w-3.5" />
+        Margin
+      </p>
+      <div className="answer">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      </div>
+    </div>
+  )
 }
 
 export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: ChatViewProps) {
@@ -36,6 +61,7 @@ export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: Chat
   useEffect(() => {
     let cancelled = false
     initialMessageSentRef.current = false
+    setError(null)
 
     const loadMessages = async () => {
       setLoading(true)
@@ -70,6 +96,7 @@ export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: Chat
 
     abortControllerRef.current = new AbortController()
 
+    // Show the question immediately; the server persists it
     const tempUserMessage: Message = {
       id: `temp-${Date.now()}`,
       thread_id: threadId,
@@ -81,6 +108,7 @@ export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: Chat
     }
     setMessages(prev => [...prev, tempUserMessage])
 
+    // First message names the thread
     if (isFirstMessage && onThreadTitleUpdate) {
       const title = userMessage.length > 50
         ? userMessage.substring(0, 47) + '...'
@@ -129,14 +157,14 @@ export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: Chat
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async () => {
     if (!input.trim() || sending) return
     const userMessage = input.trim()
     setInput('')
     await doSend(userMessage)
   }
 
+  // Send the message typed on the welcome screen once history has loaded
   useEffect(() => {
     if (!loading && initialMessage && !initialMessageSentRef.current) {
       initialMessageSentRef.current = true
@@ -151,6 +179,7 @@ export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: Chat
     }
   }
 
+  // When streaming finishes, move the streamed text into the message list
   useEffect(() => {
     if (!sending && streamingContent) {
       setMessages(prev => [
@@ -172,63 +201,48 @@ export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: Chat
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
+  const isEmpty = messages.length === 0 && !streamingContent && !waiting && !error
+
   return (
     <div className="flex h-full flex-col">
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto">
-        {messages.length === 0 && !streamingContent && !waiting && !error ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center text-muted-foreground">
-              <p className="text-2xl font-medium mb-2">What can I help with?</p>
-            </div>
+      {/* Conversation */}
+      <div className="scrollbar-quiet flex-1 overflow-y-auto">
+        {isEmpty ? (
+          <div className="flex h-full items-center justify-center px-4">
+            <p className="font-serif text-[28px] italic text-muted-foreground">What would you like to know?</p>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl px-4 py-8">
-            <div className="space-y-6">
-              {messages.map(message => (
-                <div key={message.id}>
-                  {message.role === 'user' ? (
-                    <div className="flex justify-end">
-                      <div className="max-w-[85%] rounded-3xl bg-secondary px-5 py-3">
-                        <p className="whitespace-pre-wrap">{message.content}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="prose prose-neutral dark:prose-invert max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {message.content}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                </div>
-              ))}
+          <div className="mx-auto max-w-[44rem] px-5 py-10 md:px-8">
+            <div className="space-y-9">
+              {messages.map(message =>
+                message.role === 'user'
+                  ? <UserTurn key={message.id} content={message.content} />
+                  : <AssistantTurn key={message.id} content={message.content} />
+              )}
 
-              {/* Loading indicator */}
+              {/* Waiting for the first token (model may be searching documents) */}
               {waiting && !streamingContent && (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Thinking...</span>
+                <div className="fade-up flex items-center gap-3 text-muted-foreground">
+                  <span className="dot-pulse flex gap-1" aria-hidden="true">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  </span>
+                  <span className="font-serif text-[15px] italic">Reading your documents…</span>
                 </div>
               )}
 
-              {/* Streaming message */}
-              {streamingContent && (
-                <div className="prose prose-neutral dark:prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {streamingContent}
-                  </ReactMarkdown>
-                </div>
-              )}
+              {streamingContent && <AssistantTurn content={streamingContent} />}
 
-              {/* Error message */}
               {error && (
-                <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  {error}
+                <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{error}</span>
                 </div>
               )}
 
@@ -238,39 +252,20 @@ export function ChatView({ threadId, onThreadTitleUpdate, initialMessage }: Chat
         )}
       </div>
 
-      {/* Input area */}
-      <div className="border-t bg-background">
-        <div className="mx-auto max-w-3xl px-4 py-4">
-          <form onSubmit={handleSubmit} className="flex gap-2">
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask anything"
-              disabled={sending}
-              className="flex-1 rounded-full px-4"
-            />
-            {sending ? (
-              <Button
-                type="button"
-                variant="destructive"
-                size="icon"
-                className="rounded-full"
-                onClick={handleStop}
-                title="Stop generating"
-              >
-                <Square className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                size="icon"
-                className="rounded-full"
-                disabled={!input.trim()}
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            )}
-          </form>
+      {/* Message box */}
+      <div className="bg-gradient-to-t from-background via-background to-background/0 pt-2">
+        <div className="mx-auto max-w-[44rem] px-5 pb-5 md:px-8">
+          <Composer
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            sending={sending}
+            onStop={handleStop}
+            placeholder="Ask a follow-up"
+          />
+          <p className="mt-2 text-center font-mono text-[10.5px] text-muted-foreground/80">
+            Enter to send · Shift+Enter for a new line
+          </p>
         </div>
       </div>
     </div>

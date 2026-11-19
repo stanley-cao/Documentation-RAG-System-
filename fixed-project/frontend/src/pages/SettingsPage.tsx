@@ -1,15 +1,91 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Lock, Eye, EyeOff } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Lock, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { UserMenu } from '@/components/UserMenu'
+import { AppShell } from '@/components/AppShell'
 import { useAuth } from '@/hooks/useAuth'
 import { getSettings, updateSettings, type GlobalSettings, type GlobalSettingsUpdate } from '@/lib/api'
-import logoSvg from '/logo.svg'
+
+/** One settings group: a numbered heading in the left column, fields on the right */
+function SettingsSection({
+  index,
+  title,
+  description,
+  badge,
+  children,
+}: {
+  index: string
+  title: string
+  description: ReactNode
+  badge?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section className="grid gap-5 border-t py-8 md:grid-cols-[13rem_1fr] md:gap-10">
+      <div>
+        <p className="font-mono text-[11px] text-primary">{index}</p>
+        <h2 className="mt-1 font-serif text-[21px] leading-tight tracking-tight">{title}</h2>
+        {badge}
+        <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{description}</p>
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
+  )
+}
+
+/** Label + control wrapper */
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[13px] font-medium">{label}</label>
+      {children}
+      {hint && <p className="font-mono text-[11px] text-muted-foreground">{hint}</p>}
+    </div>
+  )
+}
+
+/** Password-style input with a show/hide toggle (autofill-safe field names) */
+function SecretInput({
+  name,
+  value,
+  onChange,
+  disabled,
+}: {
+  name: string
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+}) {
+  const [shown, setShown] = useState(false)
+  return (
+    <div className="relative">
+      <Input
+        name={name}
+        type={shown ? 'text' : 'password'}
+        autoComplete="off"
+        placeholder="Enter API key"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="pr-10 font-mono text-[13px]"
+      />
+      <button
+        type="button"
+        onClick={() => setShown(!shown)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+        tabIndex={-1}
+        disabled={disabled}
+        aria-label={shown ? 'Hide API key' : 'Show API key'}
+      >
+        {shown ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  )
+}
 
 export function SettingsPage() {
-  const { user, signOut, isAdmin, loading: authLoading } = useAuth()
+  const { isAdmin, loading: authLoading } = useAuth()
   const navigate = useNavigate()
 
   const [loading, setLoading] = useState(true)
@@ -29,8 +105,6 @@ export function SettingsPage() {
   // Retrieval tuning (kept as strings while editing so the inputs can be cleared)
   const [similarityThreshold, setSimilarityThreshold] = useState('')
   const [topK, setTopK] = useState('')
-  const [showLlmKey, setShowLlmKey] = useState(false)
-  const [showEmbeddingKey, setShowEmbeddingKey] = useState(false)
 
   // Redirect non-admins to home (wait for loading to complete first)
   useEffect(() => {
@@ -96,19 +170,11 @@ export function SettingsPage() {
     }
   }
 
-  const handleSignOut = async () => {
-    try {
-      await signOut()
-    } catch (error) {
-      console.error('Failed to sign out:', error)
-    }
-  }
-
   // Show loading while auth is being checked
   if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -118,200 +184,112 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex h-screen">
-      {/* Sidebar */}
-      <div className="flex w-64 flex-col border-r bg-muted/30">
-        <div className="border-b p-4">
-          <img src={logoSvg} alt="Logo" className="h-8" />
-        </div>
-        <nav className="border-b p-2">
-          <div className="flex gap-1">
-            <button
-              onClick={() => navigate('/')}
-              className="flex-1 px-3 py-1.5 rounded-md text-sm hover:bg-muted transition-colors"
-            >
-              Chat
-            </button>
-            <button
-              onClick={() => navigate('/documents')}
-              className="flex-1 px-3 py-1.5 rounded-md text-sm hover:bg-muted transition-colors"
-            >
-              Documents
-            </button>
-          </div>
-        </nav>
-        <div className="flex-1" />
-        <div className="border-t p-2">
-          {user?.email && (
-            <UserMenu email={user.email} onSignOut={handleSignOut} isAdmin={isAdmin} />
-          )}
-        </div>
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-lg mx-auto p-8">
-          <h1 className="text-2xl font-bold mb-6">Settings</h1>
+    <AppShell active="settings">
+      <div className="scrollbar-quiet h-full overflow-y-auto">
+        <div className="mx-auto max-w-4xl px-5 py-10 md:px-8">
+          <header className="fade-up mb-8">
+            <p className="eyebrow mb-3">Administration</p>
+            <h1 className="font-serif text-[40px] font-normal leading-none tracking-tight">Settings</h1>
+            <p className="mt-3 max-w-lg text-[15px] text-muted-foreground">
+              Models and search behaviour for everyone using this workspace. API keys are encrypted at rest.
+            </p>
+          </header>
 
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-sm text-muted-foreground">Loading settings...</div>
+            <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading settings...
             </div>
           ) : (
-            <form autoComplete="off" onSubmit={(e) => e.preventDefault()} className="space-y-6">
-              {success && (
-                <div className="rounded-md bg-green-500/10 border border-green-500/20 p-3 text-sm text-green-700 dark:text-green-400">
-                  Settings saved successfully.
-                </div>
-              )}
-              {error && (
-                <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
+            <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
+              <SettingsSection
+                index="01"
+                title="LLM Configuration"
+                description="The chat model that reads search results and writes answers. Any OpenAI-compatible endpoint works."
+              >
+                <Field label="Model Name">
+                  <Input
+                    name="llm-model-field"
+                    autoComplete="off"
+                    placeholder="e.g., gpt-4o, anthropic/claude-3.5-sonnet"
+                    value={llmModel}
+                    onChange={(e) => setLlmModel(e.target.value)}
+                    className="font-mono text-[13px]"
+                  />
+                </Field>
+                <Field label="Base URL">
+                  <Input
+                    name="llm-endpoint-field"
+                    autoComplete="off"
+                    placeholder="e.g., https://openrouter.ai/api/v1"
+                    value={llmBaseUrl}
+                    onChange={(e) => setLlmBaseUrl(e.target.value)}
+                    className="font-mono text-[13px]"
+                  />
+                </Field>
+                <Field label="API Key">
+                  <SecretInput name="llm-key-field" value={llmApiKey} onChange={setLlmApiKey} />
+                </Field>
+              </SettingsSection>
 
-              {/* LLM Configuration */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-medium text-foreground">LLM Configuration</h3>
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Model Name</label>
-                    <Input
-                      name="llm-model-field"
-                      autoComplete="off"
-                      placeholder="e.g., gpt-4o, anthropic/claude-3.5-sonnet"
-                      value={llmModel}
-                      onChange={(e) => setLlmModel(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Base URL</label>
-                    <Input
-                      name="llm-endpoint-field"
-                      autoComplete="off"
-                      placeholder="e.g., https://openrouter.ai/api/v1"
-                      value={llmBaseUrl}
-                      onChange={(e) => setLlmBaseUrl(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">API Key</label>
-                    <div className="relative">
-                      <Input
-                        name="llm-key-field"
-                        type={showLlmKey ? 'text' : 'password'}
-                        autoComplete="off"
-                        placeholder="Enter API key"
-                        value={llmApiKey}
-                        onChange={(e) => setLlmApiKey(e.target.value)}
-                        className="pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowLlmKey(!showLlmKey)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        tabIndex={-1}
-                      >
-                        {showLlmKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div className="border-t" />
-
-              {/* Embedding Configuration */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-medium text-foreground">Embedding Configuration</h3>
-                  {hasChunks && (
-                    <div className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-                      <Lock className="h-3 w-3" />
-                      <span>Locked (chunks exist)</span>
-                    </div>
-                  )}
-                </div>
-                {hasChunks && (
-                  <p className="text-xs text-muted-foreground">
-                    Embedding settings cannot be changed while document chunks exist in the system. Delete all documents first to change these settings.
-                  </p>
+              <SettingsSection
+                index="02"
+                title="Embedding Configuration"
+                badge={hasChunks && (
+                  <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 font-mono text-[10.5px] text-warning">
+                    <Lock className="h-3 w-3" />
+                    Locked (chunks exist)
+                  </span>
                 )}
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Model Name</label>
-                    <Input
-                      name="emb-model-field"
-                      autoComplete="off"
-                      placeholder="e.g., text-embedding-3-small"
-                      value={embeddingModel}
-                      onChange={(e) => setEmbeddingModel(e.target.value)}
-                      disabled={hasChunks}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Base URL</label>
-                    <Input
-                      name="emb-endpoint-field"
-                      autoComplete="off"
-                      placeholder="e.g., https://api.openai.com/v1"
-                      value={embeddingBaseUrl}
-                      onChange={(e) => setEmbeddingBaseUrl(e.target.value)}
-                      disabled={hasChunks}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">API Key</label>
-                    <div className="relative">
-                      <Input
-                        name="emb-key-field"
-                        type={showEmbeddingKey ? 'text' : 'password'}
-                        autoComplete="off"
-                        placeholder="Enter API key"
-                        value={embeddingApiKey}
-                        onChange={(e) => setEmbeddingApiKey(e.target.value)}
-                        disabled={hasChunks}
-                        className="pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowEmbeddingKey(!showEmbeddingKey)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
-                        tabIndex={-1}
-                        disabled={hasChunks}
-                      >
-                        {showEmbeddingKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Dimensions</label>
-                    <Input
-                      name="emb-dims-field"
-                      type="number"
-                      autoComplete="off"
-                      placeholder="e.g., 1536"
-                      value={embeddingDimensions}
-                      onChange={(e) => setEmbeddingDimensions(e.target.value)}
-                      disabled={hasChunks}
-                    />
-                  </div>
-                </div>
-              </div>
+                description={hasChunks
+                  ? 'Embedding settings cannot be changed while document chunks exist in the system. Delete all documents first to change these settings.'
+                  : 'Turns passages and questions into vectors. Must stay the same for as long as documents are indexed with it.'}
+              >
+                <Field label="Model Name">
+                  <Input
+                    name="emb-model-field"
+                    autoComplete="off"
+                    placeholder="e.g., text-embedding-3-small"
+                    value={embeddingModel}
+                    onChange={(e) => setEmbeddingModel(e.target.value)}
+                    disabled={hasChunks}
+                    className="font-mono text-[13px]"
+                  />
+                </Field>
+                <Field label="Base URL">
+                  <Input
+                    name="emb-endpoint-field"
+                    autoComplete="off"
+                    placeholder="e.g., https://api.openai.com/v1"
+                    value={embeddingBaseUrl}
+                    onChange={(e) => setEmbeddingBaseUrl(e.target.value)}
+                    disabled={hasChunks}
+                    className="font-mono text-[13px]"
+                  />
+                </Field>
+                <Field label="API Key">
+                  <SecretInput name="emb-key-field" value={embeddingApiKey} onChange={setEmbeddingApiKey} disabled={hasChunks} />
+                </Field>
+                <Field label="Dimensions">
+                  <Input
+                    name="emb-dims-field"
+                    type="number"
+                    autoComplete="off"
+                    placeholder="e.g., 1536"
+                    value={embeddingDimensions}
+                    onChange={(e) => setEmbeddingDimensions(e.target.value)}
+                    disabled={hasChunks}
+                    className="font-mono text-[13px]"
+                  />
+                </Field>
+              </SettingsSection>
 
-              {/* Divider */}
-              <div className="border-t" />
-
-              {/* Retrieval Configuration (not locked by existing chunks) */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-medium text-foreground">Retrieval Configuration</h3>
-                <p className="text-xs text-muted-foreground">
-                  Controls which chunks the search_documents tool returns. Higher thresholds return fewer, more relevant chunks.
-                </p>
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Similarity Threshold (0–1)</label>
+              <SettingsSection
+                index="03"
+                title="Retrieval Configuration"
+                description="Controls which chunks the search_documents tool returns. Higher thresholds return fewer, more relevant chunks."
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Similarity Threshold (0–1)" hint="Minimum cosine similarity">
                     <Input
                       name="retrieval-threshold-field"
                       type="number"
@@ -322,10 +300,10 @@ export function SettingsPage() {
                       placeholder="e.g., 0.1"
                       value={similarityThreshold}
                       onChange={(e) => setSimilarityThreshold(e.target.value)}
+                      className="font-mono text-[13px]"
                     />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Max Results (1–50)</label>
+                  </Field>
+                  <Field label="Max Results (1–50)" hint="Passages sent to the model">
                     <Input
                       name="retrieval-topk-field"
                       type="number"
@@ -336,17 +314,32 @@ export function SettingsPage() {
                       placeholder="e.g., 15"
                       value={topK}
                       onChange={(e) => setTopK(e.target.value)}
+                      className="font-mono text-[13px]"
                     />
-                  </div>
+                  </Field>
                 </div>
-              </div>
+              </SettingsSection>
 
-              {/* Footer */}
-              <div className="flex justify-end gap-3 pt-2">
+              {/* Sticky footer with status + actions */}
+              <div className="sticky bottom-0 -mx-5 flex flex-wrap items-center justify-end gap-3 border-t bg-background/95 px-5 py-4 backdrop-blur md:-mx-8 md:px-8">
+                <div className="mr-auto min-w-0 text-sm" aria-live="polite">
+                  {success && (
+                    <span className="flex items-center gap-1.5 text-primary">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Settings saved successfully.
+                    </span>
+                  )}
+                  {error && (
+                    <span className="flex items-center gap-1.5 text-destructive">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      {error}
+                    </span>
+                  )}
+                </div>
                 <Button type="button" variant="ghost" onClick={() => navigate(-1)} disabled={saving}>
                   Cancel
                 </Button>
-                <Button type="button" onClick={handleSave} disabled={saving}>
+                <Button type="button" onClick={handleSave} disabled={saving} className="min-w-24">
                   {saving ? 'Saving...' : 'Save'}
                 </Button>
               </div>
@@ -354,6 +347,6 @@ export function SettingsPage() {
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   )
 }
